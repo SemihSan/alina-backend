@@ -1,0 +1,331 @@
+// prisma/schema.prisma
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Kullanıcı rolleri
+enum UserRole {
+  USER
+  DEALER
+  ADMIN
+}
+
+// Bayi başvuru durumu
+enum DealerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Bayi rozetleri (referans sayısına göre)
+enum DealerBadge {
+  STANDARD  // Normal kayıt (varsayılan)
+  BRONZE    // 5 referans
+  GOLD      // 10 referans
+  PLATINUM  // 20 referans
+}
+
+// Coin transaction türleri
+enum TransactionType {
+  EARNED_FROM_ORDER
+  SPENT_FOR_REWARD
+  ADMIN_ADJUST
+}
+
+// -------------------------
+// USER
+// -------------------------
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  fullName  String
+  role      UserRole  @default(USER)
+  coins     Int       @default(0)  // Kullanıcı puanları (müşteriler için)
+  referralCode String? @unique     // Normal kullanıcıların da referral kodu olabilir
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // Eğer bu kullanıcı bayiyse
+  dealer    Dealer?
+
+  // Sipariş geçmişi
+  orders    Order[]
+
+  // Favoriler
+  favorites Favorite[]
+
+  // Yorumlar
+  reviews   Review[]
+
+  // Sepet
+  cart      Cart?
+
+  // Referans sistemi:
+  // Benim referans kodumla kayıt olanlar
+  referrals  Referral[] @relation("ReferrerUser")
+  // Ben kimin referans koduyla geldim?
+  referredBy Referral?  @relation("ReferredUser")
+}
+
+// -------------------------
+// DEALER (BAYİ)
+// -------------------------
+model Dealer {
+  id           Int           @id @default(autoincrement())
+  user         User          @relation(fields: [userId], references: [id])
+  userId       Int           @unique
+
+  companyName  String
+  phone        String?
+  address      String?
+  status       DealerStatus  @default(PENDING)
+  referralCode String        @unique
+  badge        DealerBadge  @default(STANDARD)  // Rozet sistemi
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  // Bayinin cüzdanı
+  coinWallet       CoinWallet?
+  coinTransactions CoinTransaction[]
+  
+  // Bayinin müşteri siparişleri (referans kodu ile)
+  customerOrders   Order[]
+}
+
+// -------------------------
+// COIN CÜZDANI
+// -------------------------
+model CoinWallet {
+  id        Int       @id @default(autoincrement())
+  dealer    Dealer    @relation(fields: [dealerId], references: [id])
+  dealerId  Int       @unique
+  balance   Int       @default(0)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// -------------------------
+// COIN TRANSACTIONS (LOG)
+// -------------------------
+model CoinTransaction {
+  id             Int             @id @default(autoincrement())
+  dealer         Dealer          @relation(fields: [dealerId], references: [id])
+  dealerId       Int
+
+  change         Int
+  type           TransactionType
+  description    String?
+  relatedOrderId Int?
+
+  createdAt      DateTime        @default(now())
+}
+
+// -------------------------
+// REFERRAL (REFERANS SİSTEMİ)
+// -------------------------
+model Referral {
+  id             Int      @id @default(autoincrement())
+
+  // Referans veren (bayi veya user)
+  referrer       User?    @relation("ReferrerUser", fields: [referrerUserId], references: [id])
+  referrerUserId Int?     // 🔸 ARTIK OPSİYONEL
+
+  // Referans ile kayıt olan user
+  referredUser   User     @relation("ReferredUser", fields: [referredUserId], references: [id])
+  referredUserId Int      @unique  // Bir user en fazla 1 kez referanslı kayıt olsun
+
+  createdAt      DateTime @default(now())
+
+  @@unique([referrerUserId, referredUserId])
+}
+
+// -------------------------
+// CATEGORY (ÜRÜN KATEGORİSİ)
+// -------------------------
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String
+  slug     String    @unique
+
+  products Product[]
+}
+
+// -------------------------
+// PRODUCT (ÜRÜNLER)
+// -------------------------
+
+// Ürün hedef kitlesi (Müşteri mi Bayi mi?)
+enum ProductAudience {
+  CUSTOMER  // Müşteri ödül mağazası (fritöz, tencere, kahve makinesi)
+  DEALER    // Bayi ödül mağazası (tatil, TV, araba)
+  BOTH      // Her ikisi de görebilir
+}
+
+model Product {
+  id              Int       @id @default(autoincrement())
+  name            String
+  slug            String    @unique
+  description     String
+  priceCents      Int       // 29990 gibi, frontend TL'ye çevirir
+  imageUrl        String?   // ileride resim ekleriz
+
+  isRewardProduct Boolean   @default(false) // true ise ödül ürünü
+  coinPrice       Int?      // sadece ödül ürünlerinde dolu
+  targetAudience  ProductAudience @default(BOTH) // Kime gösterilecek?
+
+  category        Category? @relation(fields: [categoryId], references: [id])
+  categoryId      Int?
+
+  // Favorilere ekleyen kullanıcılar
+  favoritedBy     Favorite[]
+
+  // Ürün yorumları
+  reviews         Review[]
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// -------------------------
+// ORDER (SİPARİŞ)
+// -------------------------
+enum OrderStatus {
+  PENDING          // Beklemede
+  PENDING_PAYMENT  // Ödeme bekleniyor (PayTR)
+  PAID             // Ödeme yapıldı
+  PAYMENT_FAILED   // Ödeme başarısız
+  APPROVED         // Onaylandı
+  DELIVERED        // Teslim edildi
+  CANCELLED        // İptal edildi
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  
+  // Sipariş veren kullanıcı
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          Int
+
+  // Sipariş detayları
+  items           Json        // [{ productId, productName, quantity, priceCents }]
+  status          OrderStatus @default(PENDING)
+  
+  // Fiyat bilgileri
+  totalPrice      Int         // Kuruş cinsinden toplam fiyat
+  earnedCoins     Int         // Kazanılan AlinaPuan
+  
+  // Bayi referans kodu (müşteriler için zorunlu)
+  dealerReferenceCode String? // Bayiden alınan referans kodu
+  dealerId        Int?        // Referans kodunu veren bayi (opsiyonel link)
+  dealer          Dealer?     @relation(fields: [dealerId], references: [id], onDelete: SetNull)
+  
+  // Ödeme bilgileri (Bayi tarafından doldurulacak)
+  paymentMethod   PaymentMethod? // Ödeme yöntemi: CASH veya CARD
+  paymentDate     DateTime?      // Ödeme tarihi (sipariş tamamlandığında)
+  
+  // PayTR ödeme bilgileri
+  paytrToken      String?        // PayTR iframe token
+  paytrPaymentId  String?        // PayTR ödeme ID
+  paymentFailReason String?      // Başarısız ödeme sebebi
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([userId])
+  @@index([dealerId])
+}
+
+// Ödeme yöntemleri enum
+enum PaymentMethod {
+  CASH    // Nakit
+  CARD    // Kart
+}
+
+// -------------------------
+// FAVORITE (FAVORİLER)
+// -------------------------
+model Favorite {
+  id        Int      @id @default(autoincrement())
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId Int
+  
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId]) // Bir kullanıcı bir ürünü sadece 1 kez favoriye ekleyebilir
+  @@index([userId])
+}
+
+// -------------------------
+// REVIEW (ÜRÜN YORUMLARI)
+// -------------------------
+model Review {
+  id          Int      @id @default(autoincrement())
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      Int
+  
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId   Int
+  
+  rating      Int      // 1-5 yıldız
+  title       String   // Yorum başlığı
+  comment     String   @db.Text // Yorum içeriği
+  images      Json?    // Fotoğraf URL'leri array olarak: ["url1", "url2"]
+  
+  helpful     Int      @default(0) // Kaç kişi "yardımcı oldu" dedi
+  verified    Boolean  @default(false) // Onaylanmış alıcı mı?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, productId]) // Bir kullanıcı bir ürüne sadece 1 yorum yapabilir
+  @@index([productId])
+  @@index([userId])
+}
+
+// -------------------------
+// CART (SEPET)
+// -------------------------
+model Cart {
+  id        Int        @id @default(autoincrement())
+  
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int        @unique  // Her kullanıcının bir sepeti olabilir
+  
+  items     CartItem[]
+  
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+// -------------------------
+// CART ITEM (SEPET ÜRÜNÜ)
+// -------------------------
+model CartItem {
+  id        Int      @id @default(autoincrement())
+  
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  cartId    Int
+  
+  productId Int      // Ürün ID'si (manuel tutuyoruz, silinirse sorun olmasın diye relation yok)
+  quantity  Int      @default(1)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId]) // Bir sepette aynı ürün sadece 1 kez, quantity artırılır
+  @@index([cartId])
+}
