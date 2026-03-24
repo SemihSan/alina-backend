@@ -29,16 +29,7 @@ const getAllProducts = async (req, res) => {
       },
     });
 
-    // imageUrl'leri tam URL'e çevir
-    const baseUrl = process.env.API_BASE_URL || 'http://localhost:3001';
-    const productsWithFullUrls = products.map(product => ({
-      ...product,
-      imageUrl: product.imageUrl && !product.imageUrl.startsWith('http') 
-        ? `${baseUrl}${product.imageUrl}` 
-        : product.imageUrl,
-    }));
-
-    return res.json(productsWithFullUrls);
+    return res.json(products);
   } catch (error) {
     console.error('getAllProducts error:', error);
     return res.status(500).json({
@@ -75,19 +66,10 @@ const getAllRewardProducts = async (req, res) => {
       },
     });
 
-    // imageUrl'leri tam URL'e çevir
-    const baseUrl = process.env.API_BASE_URL || 'http://localhost:3001';
-    const productsWithFullUrls = rewardProducts.map(product => ({
-      ...product,
-      imageUrl: product.imageUrl && !product.imageUrl.startsWith('http') 
-        ? `${baseUrl}${product.imageUrl}` 
-        : product.imageUrl,
-    }));
-
     return res.json({
       ok: true,
-      count: productsWithFullUrls.length,
-      products: productsWithFullUrls,
+      count: rewardProducts.length,
+      products: rewardProducts,
       audience: audience || 'ALL',
     });
   } catch (error) {
