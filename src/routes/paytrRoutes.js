@@ -3,7 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const { createPayment, paytrCallback, getOrderPaymentStatus } = require('../controllers/paytrController');
-const authMiddleware = require('../middleware/authMiddleware');
+const { authMiddleware } = require('../middleware/authMiddleware');
 
 // PayTR Ödeme Başlat (Kullanıcı login gerekli)
 router.post('/create-payment', authMiddleware, createPayment);
